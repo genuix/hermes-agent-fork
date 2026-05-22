@@ -139,6 +139,7 @@ def _make_interaction(
     import discord
 
     response = SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
 
     if in_dm:
         channel = discord.DMChannel()
@@ -167,6 +168,7 @@ def _make_interaction(
         channel_id=channel_id,
         channel=channel,
         response=response,
+        followup=followup,
     )
 
 
@@ -218,6 +220,17 @@ async def test_disallowed_user_rejected_with_ephemeral(adapter, caplog):
     assert "not authorized" in (args[0] if args else kwargs.get("content", "")).lower()
     assert any("Unauthorized slash attempt" in r.message for r in caplog.records)
     assert any("DISCORD_ALLOWED_USERS" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_disallowed_user_uses_followup_when_already_deferred(adapter, caplog):
+    adapter._allowed_user_ids = {"100200300"}
+    interaction = _make_interaction("999999999")
+    interaction.response.is_done = MagicMock(return_value=True)
+    with caplog.at_level(logging.WARNING):
+        assert await adapter._check_slash_authorization(interaction, "/background hi") is False
+    interaction.followup.send.assert_awaited_once()
+    interaction.response.send_message.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

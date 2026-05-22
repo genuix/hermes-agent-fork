@@ -813,6 +813,37 @@ class DiscordAdapter(BasePlatformAdapter):
 
                 await self._handle_message(message)
 
+            async def _early_defer_interaction(interaction: discord.Interaction) -> bool:
+                """Best-effort early defer for application commands.
+
+                Discord app commands must be acknowledged within ~3 seconds.
+                ``CommandTree.interaction_check`` runs before command callbacks,
+                so we defer there first and keep the per-command helper as a
+                fallback for environments where the check is bypassed.
+                """
+                try:
+                    if getattr(interaction, "type", None) != discord.InteractionType.application_command:
+                        return True
+                    if getattr(interaction.response, "is_done", lambda: False)():
+                        return True
+                    await interaction.response.defer(ephemeral=True)
+                except Exception as e:
+                    logger.debug("[%s] Early app-command defer skipped: %s", adapter_self.name, e)
+                return True
+
+            try:
+                self._client.tree.interaction_check = _early_defer_interaction
+            except Exception as e:
+                logger.debug("[%s] Failed to install app-command interaction check: %s", adapter_self.name, e)
+
+            @self._client.event
+            async def on_interaction(interaction: discord.Interaction):
+                """Best-effort secondary defer for application commands."""
+                try:
+                    await _early_defer_interaction(interaction)
+                except Exception as e:
+                    logger.debug("[%s] Early app-command defer skipped: %s", adapter_self.name, e)
+
             @self._client.event
             async def on_voice_state_update(member, before, after):
                 """Track voice channel join/leave events."""
@@ -2434,10 +2465,16 @@ class DiscordAdapter(BasePlatformAdapter):
         )
 
         try:
-            await interaction.response.send_message(
-                "You're not authorized to use this command.",
-                ephemeral=True,
-            )
+            if getattr(interaction.response, "is_done", lambda: False)():
+                await interaction.followup.send(
+                    "You're not authorized to use this command.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "You're not authorized to use this command.",
+                    ephemeral=True,
+                )
         except Exception as e:
             # Interaction may already be responded to (e.g. caller deferred
             # before the auth check, or Discord retried). Best-effort only.
@@ -2910,12 +2947,17 @@ class DiscordAdapter(BasePlatformAdapter):
         except Exception:
             pass  # logging must never block command dispatch
 
-        # Auth gate — must run before defer() so an ephemeral rejection can
-        # be delivered on the still-unresponded interaction.
+        if not getattr(interaction.response, "is_done", lambda: False)():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except Exception as e:
+                logger.debug("Discord interaction defer failed: %s", e)
+
+        # Auth check happens after defer; unauthorized users get an ephemeral
+        # follow-up instead of an initial response.
         if not await self._check_slash_authorization(interaction, command_text):
             return
 
-        await interaction.response.defer(ephemeral=True)
         event = self._build_slash_event(interaction, command_text)
         await self.handle_message(event)
         try:
@@ -3486,9 +3528,12 @@ class DiscordAdapter(BasePlatformAdapter):
         auto_archive_duration: int = 1440,
     ) -> None:
         """Create a Discord thread from a slash command and start a session in it."""
+        # Defer immediately to avoid the 3-second timeout window, then run
+        # the auth gate and thread creation.
+        if not getattr(interaction.response, "is_done", lambda: False)():
+            await interaction.response.defer(ephemeral=True)
         if not await self._check_slash_authorization(interaction, "/thread"):
             return
-        await interaction.response.defer(ephemeral=True)
         result = await self._create_thread(
             interaction,
             name=name,
