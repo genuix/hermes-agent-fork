@@ -93,6 +93,10 @@ uv pip install -e ".[all,dev]"
 
 # Optional: browser tools
 npm install
+
+# Optional hardening: if Socket Firewall is installed, prefix dependency
+# installs with `sfw` (for example: `sfw uv pip install -e ".[all,dev]"`,
+# `sfw npm install`, `sfw npm ci`).
 ```
 
 ### Configure for development

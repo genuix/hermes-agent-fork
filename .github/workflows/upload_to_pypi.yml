@@ -34,6 +34,11 @@ jobs:
           ref: ${{ inputs.confirm_tag || github.ref }}
           fetch-tags: true
 
+      - name: Enable Socket Firewall for package installs
+        uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        with:
+          mode: firewall-free
+
       - name: Validate tag exists
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -56,10 +61,10 @@ jobs:
           node-version: '22'
 
       - name: Build web dashboard
-        run: cd web && npm ci && npm run build
+        run: cd web && sfw npm ci && npm run build
 
       - name: Build TUI bundle
-        run: cd ui-tui && npm ci && npm run build
+        run: cd ui-tui && sfw npm ci && npm run build
 
       - name: Bundle TUI into hermes_cli
         run: |
