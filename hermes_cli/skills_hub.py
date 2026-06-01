@@ -1038,7 +1038,9 @@ def do_reset(name: str, restore: bool = False,
 
     if not skip_confirm and restore:
         c.print(f"\n[bold]Restore '{name}' from bundled source?[/]")
-        c.print("[dim]This will DELETE your current copy and re-copy the bundled version.[/]")
+        c.print("[dim]Preview:[/] delete the current copy, then re-copy the bundled version.")
+        c.print("[dim]If confirmed, the next sync will treat the restored copy as freshly re-baselined.[/]")
+        c.print("[dim]This is the reversible path for user-modified bundled skills.[/]")
         try:
             answer = input("Confirm [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -1183,7 +1185,9 @@ def do_repair_official(name: str, restore: bool = False,
     c = console or _console
     if restore and not skip_confirm:
         c.print(f"\n[bold]Restore official optional skill '{name}' from repo source?[/]")
-        c.print("[dim]Existing matching active copies will be moved to a restore backup before copying the official source.[/]")
+        c.print("[dim]Preview:[/] matching active copies will be moved to a restore backup first.")
+        c.print("[dim]The official source will then be copied back into its canonical path.[/]")
+        c.print("[dim]Any provenance backfill happens after the restore completes.[/]")
         try:
             answer = input("Confirm [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):

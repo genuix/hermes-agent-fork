@@ -5,7 +5,7 @@ import pytest
 from rich.console import Console
 
 from cli import ChatConsole
-from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, handle_skills_slash
+from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, do_reset, do_repair_official, handle_skills_slash
 
 
 class _DummyLockFile:
@@ -720,6 +720,42 @@ def test_do_search_identifier_column_does_not_truncate_long_slug():
     )
 
 
+
+def test_do_reset_restore_prompts_with_preview_and_can_cancel(monkeypatch):
+    sink = StringIO()
+    console = Console(file=sink, force_terminal=False, color_system=None)
+
+    with patch("builtins.input", return_value="n") as mock_input, \
+         patch("tools.skills_sync.reset_bundled_skill") as mock_reset:
+        do_reset("google-workspace", restore=True, console=console, skip_confirm=False)
+
+    mock_input.assert_called_once()
+    mock_reset.assert_not_called()
+    output = sink.getvalue()
+    assert "Restore 'google-workspace' from bundled source?" in output
+    assert "Preview:" in output
+    assert "re-copy the bundled version" in output
+    assert "Cancelled." in output
+
+
+def test_do_repair_official_restore_prompts_with_preview_and_can_cancel(monkeypatch):
+    sink = StringIO()
+    console = Console(file=sink, force_terminal=False, color_system=None)
+
+    with patch("builtins.input", return_value="n") as mock_input, \
+         patch("tools.skills_sync.restore_official_optional_skill") as mock_restore:
+        do_repair_official("trl-fine-tuning", restore=True, console=console, skip_confirm=False)
+
+    mock_input.assert_called_once()
+    mock_restore.assert_not_called()
+    output = sink.getvalue()
+    assert "Restore official optional skill 'trl-fine-tuning' from repo source?" in output
+    assert "Preview:" in output
+    assert "restore backup first" in output
+    assert "canonical path" in output
+    assert "Cancelled." in output
+
+
 def test_do_search_json_flag_emits_full_identifiers(capsys):
     """`--json` must print a parseable array with full identifiers and skip the table."""
     from hermes_cli.skills_hub import do_search
@@ -742,4 +778,3 @@ def test_do_search_json_flag_emits_full_identifiers(capsys):
     assert payload[0]["source"] == "browse-sh"
     # Table render must be suppressed — sink should be empty (no "Searching for:" header).
     assert "Searching for:" not in sink.getvalue()
-
