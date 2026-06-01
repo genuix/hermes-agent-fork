@@ -1,3 +1,4 @@
+import json
 from io import StringIO
 from unittest.mock import patch
 
@@ -96,6 +97,24 @@ def _capture_update(monkeypatch, results) -> tuple[str, list[tuple[str, str, boo
 
     do_update(console=console)
     return sink.getvalue(), installs
+
+
+def _capture_tap_remove(monkeypatch, tmp_path, taps, confirm="y") -> tuple[str, list[dict]]:
+    import tools.skills_hub as hub
+    from tools.skills_hub import TapsManager as RealTapsManager
+    from hermes_cli.skills_hub import do_tap
+
+    sink = StringIO()
+    console = Console(file=sink, force_terminal=False, color_system=None)
+    taps_file = tmp_path / "skills" / ".hub" / "taps.json"
+    taps_file.parent.mkdir(parents=True, exist_ok=True)
+    taps_file.write_text(json.dumps({"taps": taps}))
+
+    monkeypatch.setattr(hub, "TapsManager", lambda: RealTapsManager(path=taps_file))
+    monkeypatch.setattr("builtins.input", lambda prompt="": confirm)
+
+    do_tap("remove", repo="owner/repo", console=console)
+    return sink.getvalue(), json.loads(taps_file.read_text()).get("taps", [])
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +266,35 @@ def test_do_update_reinstalls_outdated_skills(monkeypatch):
 
     assert installs == [("skills-sh/example/repo/hub-skill", "category", True)]
     assert "Updated 1 skill" in output
+
+
+def test_do_tap_remove_prompts_and_removes(monkeypatch, tmp_path, hub_env):
+    output, remaining = _capture_tap_remove(
+        monkeypatch,
+        tmp_path,
+        [{"repo": "owner/repo", "path": "skills/"}],
+        confirm="y",
+    )
+
+    assert "Remove tap 'owner/repo'?" in output
+    assert "Preview:" in output
+    assert "Current path:" in output
+    assert "Removed tap:" in output
+    assert remaining == []
+
+
+def test_do_tap_remove_can_cancel(monkeypatch, tmp_path, hub_env):
+    output, remaining = _capture_tap_remove(
+        monkeypatch,
+        tmp_path,
+        [{"repo": "owner/repo", "path": "skills/"}],
+        confirm="n",
+    )
+
+    assert "Remove tap 'owner/repo'?" in output
+    assert "Cancelled." in output
+    assert "Removed tap:" not in output
+    assert remaining == [{"repo": "owner/repo", "path": "skills/"}]
 
 
 def test_handle_skills_slash_search_accepts_chatconsole_without_status_errors():

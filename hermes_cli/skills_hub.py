@@ -1230,7 +1230,8 @@ def do_repair_official(name: str, restore: bool = False,
             pass
 
 
-def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> None:
+def do_tap(action: str, repo: str = "", console: Optional[Console] = None,
+           skip_confirm: bool = False) -> None:
     """Manage taps (custom GitHub repo sources)."""
     from tools.skills_hub import TapsManager
 
@@ -1264,6 +1265,25 @@ def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> No
         if not repo:
             c.print("[bold red]Error:[/] Repo required. Usage: hermes skills tap remove owner/repo\n")
             return
+
+        taps = mgr.list_taps()
+        current = next((t for t in taps if t.get("repo") == repo), None)
+        if not current:
+            c.print(f"[bold red]Error:[/] Tap not found: {repo}\n")
+            return
+
+        c.print(f"\n[bold]Remove tap '{repo}'?[/]")
+        c.print(f"[dim]Preview:[/] delete the custom tap entry for [cyan]{repo}[/].")
+        c.print(f"[dim]Current path:[/] {current.get('path', 'skills/')}\n")
+        if not skip_confirm:
+            try:
+                answer = input("Confirm [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer not in {"y", "yes"}:
+                c.print("[dim]Cancelled.[/]\n")
+                return
+
         if mgr.remove(repo):
             c.print(f"[bold green]Removed tap:[/] {repo}\n")
         else:
