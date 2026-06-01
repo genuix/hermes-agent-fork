@@ -6,7 +6,7 @@ import pytest
 from rich.console import Console
 
 from cli import ChatConsole
-from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, do_reset, do_repair_official, do_snapshot_import, handle_skills_slash
+from hermes_cli.skills_hub import do_check, do_install, do_list, do_publish, do_update, do_reset, do_repair_official, do_snapshot_import, handle_skills_slash
 
 
 class _DummyLockFile:
@@ -136,6 +136,39 @@ def _capture_snapshot_import(monkeypatch, tmp_path, snapshot, confirm="y", force
 
     do_snapshot_import(str(snap_file), force=force, console=console)
     return sink.getvalue(), installs, json.loads(taps_file.read_text()).get("taps", [])
+
+
+def _capture_publish(monkeypatch, tmp_path, confirm="y", target="github", repo="owner/repo"):
+    import hermes_cli.skills_hub as cli_hub
+    import tools.skills_hub as hub
+    import tools.skills_guard as guard
+
+    skill_dir = tmp_path / "skills" / "cat" / "demo-skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: Demo skill\n---\n# Demo\n",
+        encoding="utf-8",
+    )
+
+    sink = StringIO()
+    console = Console(file=sink, force_terminal=False, color_system=None)
+    calls = []
+
+    class _Auth:
+        def is_authenticated(self):
+            return True
+
+        def get_headers(self):
+            return {"Authorization": "Bearer token"}
+
+    monkeypatch.setattr(hub, "GitHubAuth", lambda: _Auth())
+    monkeypatch.setattr(guard, "scan_skill", lambda path, source="self": type("R", (), {"verdict": "safe"})())
+    monkeypatch.setattr(guard, "format_scan_report", lambda result: "scan ok")
+    monkeypatch.setattr(cli_hub, "_github_publish", lambda path, name, repo, auth: calls.append((path.name, name, repo)) or (True, "published ok"))
+    monkeypatch.setattr("builtins.input", lambda prompt="": confirm)
+
+    do_publish(str(skill_dir), target=target, repo=repo, console=console)
+    return sink.getvalue(), calls
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +392,24 @@ def test_do_snapshot_import_can_cancel(monkeypatch, tmp_path, hub_env):
     assert "Cancelled." in output
     assert installs == []
     assert taps == []
+
+
+def test_do_publish_prompts_and_publishes(monkeypatch, tmp_path, hub_env):
+    output, calls = _capture_publish(monkeypatch, tmp_path, confirm="y")
+
+    assert "Publish 'demo-skill' to owner/repo?" in output
+    assert "Preview:" in output
+    assert "repo=owner/repo" in output or "owner/repo" in output
+    assert "published ok" in output
+    assert calls == [("demo-skill", "demo-skill", "owner/repo")]
+
+
+def test_do_publish_can_cancel(monkeypatch, tmp_path, hub_env):
+    output, calls = _capture_publish(monkeypatch, tmp_path, confirm="n")
+
+    assert "Publish 'demo-skill' to owner/repo?" in output
+    assert "Cancelled." in output
+    assert calls == []
 
 
 def test_handle_skills_slash_search_accepts_chatconsole_without_status_errors():

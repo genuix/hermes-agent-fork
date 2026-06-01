@@ -1294,7 +1294,8 @@ def do_tap(action: str, repo: str = "", console: Optional[Console] = None,
 
 
 def do_publish(skill_path: str, target: str = "github", repo: str = "",
-               console: Optional[Console] = None) -> None:
+               console: Optional[Console] = None,
+               skip_confirm: bool = False) -> None:
     """Publish a local skill to a registry (GitHub PR or ClawHub submission)."""
     from tools.skills_hub import GitHubAuth, SKILLS_DIR
     from tools.skills_guard import scan_skill, format_scan_report
@@ -1347,6 +1348,19 @@ def do_publish(skill_path: str, target: str = "github", repo: str = "",
             c.print("[bold red]Error:[/] GitHub authentication required.\n"
                     f"Set GITHUB_TOKEN in {display_hermes_home()}/.env or run 'gh auth login'.\n")
             return
+
+        c.print(f"\n[bold]Publish '{name}' to {repo}?[/]")
+        c.print(f"[dim]Preview:[/] create a GitHub fork/branch/PR for [cyan]{path}[/].")
+        c.print(f"[dim]Target:[/] {repo}")
+        c.print("[dim]This will contact GitHub and create a publish branch from the validated local skill.[/]")
+        if not skip_confirm:
+            try:
+                answer = input("Confirm [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer not in {"y", "yes"}:
+                c.print("[dim]Cancelled.[/]\n")
+                return
 
         c.print(f"[bold]Publishing '{name}' to {repo}...[/]")
         success, msg = _github_publish(path, name, repo, auth)
@@ -1621,6 +1635,7 @@ def skills_command(args) -> None:
             args.skill_path,
             target=getattr(args, "to", "github"),
             repo=getattr(args, "repo", ""),
+            skip_confirm=getattr(args, "yes", False),
         )
     elif action == "snapshot":
         snap_action = getattr(args, "snapshot_action", None)
@@ -1826,7 +1841,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
                 target = args[i + 1]
             if a == "--repo" and i + 1 < len(args):
                 repo = args[i + 1]
-        do_publish(skill_path, target=target, repo=repo, console=c)
+        do_publish(skill_path, target=target, repo=repo, console=c, skip_confirm=True)
 
     elif action == "snapshot":
         if not args:

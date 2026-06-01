@@ -13339,6 +13339,9 @@ Examples:
     skills_publish.add_argument(
         "--repo", default="", help="Target GitHub repo (e.g. openai/skills)"
     )
+    skills_publish.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
 
     skills_snapshot = skills_subparsers.add_parser(
         "snapshot", help="Export/import skill configurations"
