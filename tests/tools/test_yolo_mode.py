@@ -208,6 +208,27 @@ class TestYoloMode:
         finally:
             reset_current_session_key(token_b)
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp ~/.hermes/config.yaml /tmp/config.yaml",
+            "mv ~/.hermes/.env /tmp/env.backup",
+            "install -m 600 ~/.hermes/config.yaml /tmp/config.yaml",
+        ],
+    )
+    def test_terminal_copy_move_install_into_hermes_security_files_requires_approval(
+        self, monkeypatch, command
+    ):
+        """Terminal copy/move/install into Hermes security files must not auto-approve."""
+        monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        monkeypatch.setenv("HERMES_SESSION_KEY", "test-session")
+
+        result = check_dangerous_command(command, "local", approval_callback=lambda *a: "deny")
+
+        assert result["approved"] is False
+        assert "overwrite" in result["message"].lower() or "copy/move" in result["message"].lower()
+
     def test_clear_session_removes_session_yolo_state(self):
         """Session cleanup must remove YOLO bypass state."""
         enable_session_yolo("session-a")

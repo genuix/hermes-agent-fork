@@ -403,6 +403,7 @@ DANGEROUS_PATTERNS = [
     # File copy/move/edit into sensitive system paths (/etc/ and macOS
     # /private/etc/ mirror).
     (rf'\b(cp|mv|install)\b.*\s{_SYSTEM_CONFIG_PATH}', "copy/move file into system config path"),
+    (rf'\b(cp|mv|install)\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "copy/move Hermes config/env file"),
     (rf'\b(cp|mv|install)\b.*\s["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config file"),
     (rf'\bsed\s+-[^\s]*i.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config"),
     (rf'\bsed\s+--in-place\b.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config (long flag)"),
