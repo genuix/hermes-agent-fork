@@ -1500,7 +1500,8 @@ def do_snapshot_export(output_path: str, console: Optional[Console] = None) -> N
 
 
 def do_snapshot_import(input_path: str, force: bool = False,
-                       console: Optional[Console] = None) -> None:
+                       console: Optional[Console] = None,
+                       skip_confirm: bool = False) -> None:
     """Re-install skills from a snapshot file."""
     from tools.skills_hub import TapsManager
 
@@ -1516,8 +1517,34 @@ def do_snapshot_import(input_path: str, force: bool = False,
         c.print(f"[bold red]Error:[/] Invalid JSON in {inp}\n")
         return
 
-    # Restore taps first
     taps = snapshot.get("taps", [])
+    skills = snapshot.get("skills", [])
+    if not taps and not skills:
+        c.print("[dim]No taps or skills in snapshot to import.[/]\n")
+        return
+
+    c.print(f"\n[bold]Import snapshot from '{inp}'?[/]")
+    if taps:
+        tap_labels = [tap.get("repo", "") for tap in taps if tap.get("repo")]
+        c.print(f"[dim]Preview:[/] restore {len(taps)} tap(s).")
+        if tap_labels:
+            c.print(f"[dim]Taps:[/] {', '.join(tap_labels)}")
+    if skills:
+        skill_labels = [entry.get("identifier") or entry.get("name", "?") for entry in skills]
+        c.print(f"[dim]Preview:[/] install {len(skills)} skill(s).")
+        c.print(f"[dim]Skills:[/] {', '.join(skill_labels)}")
+    c.print("[dim]This restores taps before installing skills from the snapshot.[/]")
+
+    if not skip_confirm:
+        try:
+            answer = input("Confirm [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer not in {"y", "yes"}:
+            c.print("[dim]Cancelled.[/]\n")
+            return
+
+    # Restore taps first
     if taps:
         mgr = TapsManager()
         for tap in taps:
@@ -1527,7 +1554,6 @@ def do_snapshot_import(input_path: str, force: bool = False,
         c.print(f"[dim]Restored {len(taps)} tap(s)[/]")
 
     # Install skills
-    skills = snapshot.get("skills", [])
     if not skills:
         c.print("[dim]No skills in snapshot to install.[/]\n")
         return
@@ -1601,7 +1627,11 @@ def skills_command(args) -> None:
         if snap_action == "export":
             do_snapshot_export(args.output)
         elif snap_action == "import":
-            do_snapshot_import(args.input, force=getattr(args, "force", False))
+            do_snapshot_import(
+                args.input,
+                force=getattr(args, "force", False),
+                skip_confirm=getattr(args, "yes", False),
+            )
         else:
             _console.print("Usage: hermes skills snapshot [export|import]\n")
     elif action == "tap":
@@ -1807,7 +1837,8 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
             do_snapshot_export(args[1], console=c)
         elif snap_action == "import" and len(args) > 1:
             force = "--force" in args
-            do_snapshot_import(args[1], force=force, console=c)
+            yes = "--yes" in args or "-y" in args
+            do_snapshot_import(args[1], force=force, skip_confirm=yes, console=c)
         else:
             c.print("[bold red]Usage:[/] /skills snapshot export <file> | /skills snapshot import <file>\n")
 

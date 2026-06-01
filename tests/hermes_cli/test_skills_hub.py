@@ -6,7 +6,7 @@ import pytest
 from rich.console import Console
 
 from cli import ChatConsole
-from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, do_reset, do_repair_official, handle_skills_slash
+from hermes_cli.skills_hub import do_check, do_install, do_list, do_update, do_reset, do_repair_official, do_snapshot_import, handle_skills_slash
 
 
 class _DummyLockFile:
@@ -115,6 +115,27 @@ def _capture_tap_remove(monkeypatch, tmp_path, taps, confirm="y") -> tuple[str, 
 
     do_tap("remove", repo="owner/repo", console=console)
     return sink.getvalue(), json.loads(taps_file.read_text()).get("taps", [])
+
+
+def _capture_snapshot_import(monkeypatch, tmp_path, snapshot, confirm="y", force=False):
+    import tools.skills_hub as hub
+    from tools.skills_hub import TapsManager as RealTapsManager
+
+    sink = StringIO()
+    console = Console(file=sink, force_terminal=False, color_system=None)
+    snap_file = tmp_path / "snapshot.json"
+    snap_file.write_text(json.dumps(snapshot))
+    taps_file = tmp_path / "skills" / ".hub" / "taps.json"
+    taps_file.parent.mkdir(parents=True, exist_ok=True)
+    taps_file.write_text(json.dumps({"taps": []}))
+    installs = []
+
+    monkeypatch.setattr(hub, "TapsManager", lambda: RealTapsManager(path=taps_file))
+    monkeypatch.setattr("builtins.input", lambda prompt="": confirm)
+    monkeypatch.setattr("hermes_cli.skills_hub.do_install", lambda identifier, category="", force=False, console=None: installs.append((identifier, category, force)))
+
+    do_snapshot_import(str(snap_file), force=force, console=console)
+    return sink.getvalue(), installs, json.loads(taps_file.read_text()).get("taps", [])
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +316,49 @@ def test_do_tap_remove_can_cancel(monkeypatch, tmp_path, hub_env):
     assert "Cancelled." in output
     assert "Removed tap:" not in output
     assert remaining == [{"repo": "owner/repo", "path": "skills/"}]
+
+
+def test_do_snapshot_import_prompts_and_restores(monkeypatch, tmp_path, hub_env):
+    output, installs, taps = _capture_snapshot_import(
+        monkeypatch,
+        tmp_path,
+        {
+            "taps": [{"repo": "owner/repo", "path": "skills/"}],
+            "skills": [
+                {"name": "alpha", "identifier": "skills-sh/example/alpha", "category": "cat"},
+                {"name": "beta", "identifier": "skills-sh/example/beta", "category": ""},
+            ],
+        },
+        confirm="y",
+        force=True,
+    )
+
+    assert "Import snapshot" in output
+    assert "Preview:" in output
+    assert "Restore 1 tap(s)" in output or "restore 1 tap(s)" in output.lower()
+    assert "Install 2 skill(s)" in output or "install 2 skill(s)" in output.lower()
+    assert installs == [
+        ("skills-sh/example/alpha", "cat", True),
+        ("skills-sh/example/beta", "", True),
+    ]
+    assert taps == [{"repo": "owner/repo", "path": "skills/"}]
+
+
+def test_do_snapshot_import_can_cancel(monkeypatch, tmp_path, hub_env):
+    output, installs, taps = _capture_snapshot_import(
+        monkeypatch,
+        tmp_path,
+        {
+            "taps": [{"repo": "owner/repo", "path": "skills/"}],
+            "skills": [{"name": "alpha", "identifier": "skills-sh/example/alpha", "category": "cat"}],
+        },
+        confirm="n",
+    )
+
+    assert "Import snapshot" in output
+    assert "Cancelled." in output
+    assert installs == []
+    assert taps == []
 
 
 def test_handle_skills_slash_search_accepts_chatconsole_without_status_errors():

@@ -13355,6 +13355,9 @@ Examples:
     snap_import.add_argument(
         "--force", action="store_true", help="Force install despite caution verdict"
     )
+    snap_import.add_argument(
+        "--yes", "-y", action="store_true", help="Skip confirmation prompt"
+    )
 
     skills_tap = skills_subparsers.add_parser("tap", help="Manage skill sources")
     tap_subparsers = skills_tap.add_subparsers(dest="tap_action")
