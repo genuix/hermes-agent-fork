@@ -1002,7 +1002,18 @@ def do_uninstall(name: str, console: Optional[Console] = None,
 
     # skip_confirm bypasses the prompt (needed in TUI mode where input() hangs)
     if not skip_confirm:
+        from tools.skills_hub import HubLockFile
+
+        entry = HubLockFile().get_installed(name)
         c.print(f"\n[bold]Uninstall '{name}'?[/]")
+        if entry:
+            install_path = entry.get("install_path", "")
+            source = entry.get("source", "")
+            trust = entry.get("trust_level", "")
+            c.print(f"[dim]Preview:[/] remove the hub-installed copy at [bold]{install_path}[/].")
+            c.print(f"[dim]This will also drop its hub provenance entry ({source}, {trust}).[/]")
+        else:
+            c.print("[dim]Preview:[/] remove the hub-installed copy from the skills tree.[/]")
         try:
             answer = input("Confirm [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):

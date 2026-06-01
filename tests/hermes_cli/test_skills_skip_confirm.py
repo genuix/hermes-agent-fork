@@ -171,3 +171,30 @@ class TestDoUninstallSkipConfirm:
              patch("builtins.input", return_value="n"):
             do_uninstall("test-skill", skip_confirm=False)
             mock_uninstall.assert_not_called()
+
+    def test_without_skip_confirm_shows_preview(self):
+        """Without skip_confirm, uninstall should show a preview before prompting."""
+        from hermes_cli.skills_hub import do_uninstall
+        from rich.console import Console
+        from io import StringIO
+
+        sink = StringIO()
+        console = Console(file=sink, force_terminal=False, color_system=None)
+        fake_entry = {"install_path": "productivity/test-skill", "source": "github", "trust_level": "community"}
+
+        class _FakeLock:
+            def get_installed(self, name):
+                return fake_entry
+
+        with patch("builtins.input", return_value="n") as mock_input, \
+             patch("tools.skills_hub.HubLockFile", return_value=_FakeLock()), \
+             patch("tools.skills_hub.uninstall_skill") as mock_uninstall:
+            do_uninstall("test-skill", console=console, skip_confirm=False)
+
+        mock_input.assert_called_once()
+        mock_uninstall.assert_not_called()
+        output = sink.getvalue()
+        assert "Uninstall 'test-skill'?" in output
+        assert "Preview:" in output
+        assert "productivity/test-skill" in output
+        assert "drop its hub provenance entry" in output
