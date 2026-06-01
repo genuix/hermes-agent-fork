@@ -229,6 +229,28 @@ class TestYoloMode:
         assert result["approved"] is False
         assert "overwrite" in result["message"].lower() or "copy/move" in result["message"].lower()
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp ~/.hermes/auth.json /tmp/auth.json",
+            "mv ~/.hermes/webhook_subscriptions.json /tmp/webhook_subscriptions.json",
+            "install -m 600 ~/.hermes/mcp-tokens/srv.json /tmp/srv.json",
+            "sed -i 's/foo/bar/' ~/.hermes/.anthropic_oauth.json",
+        ],
+    )
+    def test_terminal_hermes_control_files_require_approval(
+        self, monkeypatch, command
+    ):
+        """Hermes control files and token stores must not be mutated via terminal helpers."""
+        monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        monkeypatch.setenv("HERMES_SESSION_KEY", "test-session")
+
+        result = check_dangerous_command(command, "local", approval_callback=lambda *a: "deny")
+
+        assert result["approved"] is False
+        assert "copy/move" in result["message"].lower() or "in-place edit" in result["message"].lower()
+
     def test_clear_session_removes_session_yolo_state(self):
         """Session cleanup must remove YOLO bypass state."""
         enable_session_yolo("session-a")

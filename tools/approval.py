@@ -142,6 +142,29 @@ _HERMES_CONFIG_PATH = (
     r'(?:\$hermes_home|\$\{hermes_home\})/)'
     r'config\.yaml\b'
 )
+# Hermes control-plane state and credential stores that define the agent's
+# identity on the local/personal machine. These are protected alongside
+# config.yaml/.env so terminal copy/move/install, sed -i, tee, and redirection
+# cannot silently mutate the agent's own control surface.
+_HERMES_CONTROL_FILE_PATH = (
+    r'(?:~\/\.hermes/|'
+    r'(?:\$home|\$\{home\})/\.hermes/|'
+    r'(?:\$hermes_home|\$\{hermes_home\})/)'
+    r'(?:'
+    r'auth\.json\b|'
+    r'auth\.lock\b|'
+    r'webhook_subscriptions\.json\b|'
+    r'\.anthropic_oauth\.json\b|'
+    r'config\.yaml\b|'
+    r'\.env\b'
+    r')'
+)
+_HERMES_CONTROL_DIR_PATH = (
+    r'(?:~\/\.hermes/|'
+    r'(?:\$home|\$\{home\})/\.hermes/|'
+    r'(?:\$hermes_home|\$\{hermes_home\})/)'
+    r'(?:mcp-tokens|pairing)(?:/|$)'
+)
 _PROJECT_ENV_PATH = r'(?:(?:/|\.{1,2}/)?(?:[^\s/"\'`]+/)*\.env(?:\.[^/\s"\'`]+)*)'
 _PROJECT_CONFIG_PATH = r'(?:(?:/|\.{1,2}/)?(?:[^\s/"\'`]+/)*config\.yaml)'
 _SHELL_RC_FILES = (
@@ -370,6 +393,8 @@ DANGEROUS_PATTERNS = [
     (rf'>>?\s*["\']?{_SENSITIVE_WRITE_TARGET}', "overwrite system file via redirection"),
     (rf'\btee\b.*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config via tee"),
     (rf'>>?\s*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config via redirection"),
+    (rf'\btee\b.*["\']?(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH}|{_HERMES_CONTROL_FILE_PATH}|{_HERMES_CONTROL_DIR_PATH})', "overwrite Hermes control file via tee"),
+    (rf'>>?\s*["\']?(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH}|{_HERMES_CONTROL_FILE_PATH}|{_HERMES_CONTROL_DIR_PATH})', "overwrite Hermes control file via redirection"),
     (r'\bxargs\s+.*\brm\b', "xargs with rm"),
     # find -exec rm / -execdir rm — the -execdir variant (same semantics,
     # runs in the directory of each match) was previously missed. Claude
@@ -403,16 +428,16 @@ DANGEROUS_PATTERNS = [
     # File copy/move/edit into sensitive system paths (/etc/ and macOS
     # /private/etc/ mirror).
     (rf'\b(cp|mv|install)\b.*\s{_SYSTEM_CONFIG_PATH}', "copy/move file into system config path"),
-    (rf'\b(cp|mv|install)\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "copy/move Hermes config/env file"),
+    (rf'\b(cp|mv|install)\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH}|{_HERMES_CONTROL_FILE_PATH}|{_HERMES_CONTROL_DIR_PATH})', "copy/move Hermes control file"),
     (rf'\b(cp|mv|install)\b.*\s["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config file"),
     (rf'\bsed\s+-[^\s]*i.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config"),
     (rf'\bsed\s+--in-place\b.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config (long flag)"),
-    # In-place edit of a Hermes-managed security file (~/.hermes/config.yaml or
-    # .env). sed -i bypasses the redirection/tee patterns above because it
-    # mutates the file directly. Pairs the file_tools write_file/patch deny so
-    # the terminal side is not an open door. See #14639.
-    (rf'\bsed\s+-[^\s]*i.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "in-place edit of Hermes config/env"),
-    (rf'\bsed\s+--in-place\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "in-place edit of Hermes config/env (long flag)"),
+    # In-place edit of a Hermes-managed security/control file. sed -i bypasses
+    # the redirection/tee patterns above because it mutates the file directly.
+    # Pairs the file_tools write_file/patch deny so the terminal side is not
+    # an open door. See #14639.
+    (rf'\bsed\s+-[^\s]*i.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH}|{_HERMES_CONTROL_FILE_PATH}|{_HERMES_CONTROL_DIR_PATH})', "in-place edit of Hermes control file"),
+    (rf'\bsed\s+--in-place\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH}|{_HERMES_CONTROL_FILE_PATH}|{_HERMES_CONTROL_DIR_PATH})', "in-place edit of Hermes control file (long flag)"),
     # Script execution via heredoc — bypasses the -e/-c flag patterns above.
     # `python3 << 'EOF'` feeds arbitrary code via stdin without -c/-e flags.
     (r'\b(python[23]?|perl|ruby|node)\s+<<', "script execution via heredoc"),
