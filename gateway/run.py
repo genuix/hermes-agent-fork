@@ -12287,14 +12287,46 @@ class GatewayRunner:
         except ValueError:
             target_hash = arg
 
-        result = mgr.restore(cwd, target_hash)
-        if result["success"]:
-            return t(
-                "gateway.rollback.restored",
-                hash=result["restored_to"],
-                reason=result["reason"],
-            )
-        return t("gateway.rollback.restore_failed", error=result["error"])
+        # Canary: preview the restore target so the user can inspect what will
+        # change before the reversible action runs.
+        preview_stat = ""
+        preview_diff = ""
+        try:
+            preview = mgr.diff(cwd, target_hash)
+            if preview.get("success"):
+                preview_stat = (preview.get("stat") or "").strip()
+                preview_diff = (preview.get("diff") or "").strip()
+        except Exception:
+            pass
+
+        async def _execute_restore() -> str:
+            result = mgr.restore(cwd, target_hash)
+            if result["success"]:
+                return (
+                    f"✅ Restored to checkpoint {result['restored_to']}: {result['reason']}\n"
+                    "A pre-rollback snapshot was saved automatically."
+                )
+            return t("gateway.rollback.restore_failed", error=result["error"])
+
+        preview_parts = [
+            f"This will restore checkpoint `{target_hash[:8]}` for `{cwd}`.",
+            "A pre-rollback snapshot will be taken automatically, so the action is reversible.",
+        ]
+        if preview_stat:
+            preview_parts.append(f"Preview stat: {preview_stat}")
+        if preview_diff:
+            diff_lines = preview_diff.splitlines()[:8]
+            preview_parts.append("Preview diff:\n```\n" + "\n".join(diff_lines) + "\n```")
+        else:
+            preview_parts.append("Preview diff unavailable.")
+
+        return await self._maybe_confirm_destructive_slash(
+            event=event,
+            command="rollback",
+            title="/rollback",
+            detail="\n\n".join(preview_parts),
+            execute=_execute_restore,
+        )
 
     async def _handle_background_command(self, event: MessageEvent) -> str:
         """Handle /background <prompt> — run a prompt in a separate background session.
@@ -14283,7 +14315,7 @@ class GatewayRunner:
         detail: str,
         execute,
     ) -> Union[str, "EphemeralReply", None]:
-        """Gate a destructive session slash command (/new, /reset, /undo).
+        """Gate a destructive session slash command (/new, /reset, /undo, /rollback).
 
         ``execute`` is an async callable ``execute() -> str | EphemeralReply``
         that performs the destructive action.  If the
@@ -14332,7 +14364,7 @@ class GatewayRunner:
             result = await execute()
             if choice == "always":
                 note = (
-                    "\n\nℹ️ Future /clear, /new, /reset, and /undo will run "
+                    "\n\nℹ️ Future /clear, /new, /reset, /undo, and /rollback will run "
                     "without confirmation. Re-enable via "
                     "`approvals.destructive_slash_confirm: true` in config.yaml."
                 )

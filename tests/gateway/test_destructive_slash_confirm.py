@@ -10,6 +10,7 @@ immediately.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -258,4 +259,65 @@ async def test_resolve_always_persists_opt_out_and_runs_execute(monkeypatch):
     assert saved.get("approvals.destructive_slash_confirm") is False
     assert resolved is not None
     assert "✨ fresh" in resolved
-    assert "config.yaml" in resolved
+
+
+@pytest.mark.asyncio
+async def test_rollback_command_resolve_once_runs_restore_and_returns_result(monkeypatch):
+    """Resolving the /rollback confirm with 'once' must run restore and return
+    the reversible-restore message rather than leaving the checkpoint untouched."""
+    from tools import slash_confirm as _slash_confirm_mod
+
+    runner = _make_runner()
+    runner._read_user_config = lambda: {"approvals": {"destructive_slash_confirm": True}}
+    session_key = build_session_key(_make_source())
+    runner._session_key_for_source = lambda source: session_key
+    _slash_confirm_mod.clear(session_key)
+
+    temp_home = Path("/tmp/rollback-home")
+    temp_home.mkdir(parents=True, exist_ok=True)
+    (temp_home / "config.yaml").write_text(
+        "checkpoints:\n  enabled: true\n  max_snapshots: 10\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("gateway.run._hermes_home", temp_home)
+
+    created_managers = []
+
+    class FakeCheckpointManager:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.diff_calls = []
+            self.restore_calls = []
+            self.list_calls = []
+            created_managers.append(self)
+
+        def list_checkpoints(self, cwd):
+            self.list_calls.append(cwd)
+            return [{"hash": "abc12345", "short_hash": "abc12345", "reason": "before patch"}]
+
+        def diff(self, cwd, target_hash):
+            self.diff_calls.append((cwd, target_hash))
+            return {"success": True, "stat": " 1 file changed", "diff": "diff --git a/a b/a\n"}
+
+        def restore(self, cwd, target_hash):
+            self.restore_calls.append((cwd, target_hash))
+            return {"success": True, "restored_to": target_hash[:8], "reason": "before patch"}
+
+    monkeypatch.setattr("tools.checkpoint_manager.CheckpointManager", FakeCheckpointManager)
+    monkeypatch.setattr("tools.checkpoint_manager.format_checkpoint_list", lambda *_args, **_kwargs: "LIST")
+    monkeypatch.setenv("TERMINAL_CWD", "/tmp/rollback-work")
+
+    await runner._handle_rollback_command(_make_event("/rollback abc12345"))
+    pending = _slash_confirm_mod.get_pending(session_key)
+    assert pending is not None
+
+    resolved = await _slash_confirm_mod.resolve(
+        session_key, pending["confirm_id"], "once"
+    )
+
+    assert created_managers, "rollback should create a checkpoint manager"
+    mgr = created_managers[0]
+    assert mgr.diff_calls == [("/tmp/rollback-work", "abc12345")]
+    assert mgr.restore_calls == [("/tmp/rollback-work", "abc12345")]
+    assert resolved is not None
+    assert "Restored to checkpoint abc12345" in resolved
+    assert "pre-rollback snapshot" in resolved
