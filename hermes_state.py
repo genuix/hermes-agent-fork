@@ -33,7 +33,7 @@ T = TypeVar("T")
 
 DEFAULT_DB_PATH = get_hermes_home() / "state.db"
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # ---------------------------------------------------------------------------
 # WAL-compatibility fallback
@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     cost_source TEXT,
     pricing_version TEXT,
     title TEXT,
+    mission_state TEXT,
     api_call_count INTEGER DEFAULT 0,
     handoff_state TEXT,
     handoff_platform TEXT,
@@ -980,6 +981,110 @@ class SessionDB:
             conn.execute("UPDATE sessions SET cwd = ? WHERE id = ?", (cwd, session_id))
 
         self._execute_write(_do)
+
+    def get_child_session_ids(self, session_id: str) -> List[str]:
+        """Return child session IDs ordered by creation time."""
+        if not session_id:
+            return []
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT id FROM sessions WHERE parent_session_id = ? ORDER BY started_at ASC",
+                (session_id,),
+            )
+            rows = cursor.fetchall()
+        return [row["id"] if isinstance(row, sqlite3.Row) else row[0] for row in rows]
+
+    def update_session_mission_state(self, session_id: str, mission_state) -> None:
+        """Persist the canonical mission-state snapshot for a session."""
+        if not session_id:
+            return
+        from agent.runtime_state import MissionState
+
+        state = mission_state if isinstance(mission_state, MissionState) else MissionState.from_dict(mission_state)
+        state.session_id = state.session_id or session_id
+        payload = state.to_json()
+
+        def _do(conn):
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, source, started_at) VALUES (?, ?, ?)",
+                (session_id, "unknown", time.time()),
+            )
+            conn.execute(
+                "UPDATE sessions SET mission_state = ? WHERE id = ?",
+                (payload, session_id),
+            )
+
+        self._execute_write(_do)
+
+    def get_session_mission_state(self, session_id: str):
+        """Return a parsed mission-state snapshot for a session, or None."""
+        if not session_id:
+            return None
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT mission_state FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+        if not row:
+            return None
+        raw = row["mission_state"] if isinstance(row, sqlite3.Row) else row[0]
+        if not raw:
+            return None
+        from agent.runtime_state import MissionState
+
+        return MissionState.from_json(raw)
+
+    def mutate_session_mission_state(self, session_id: str, mutator: Callable[[Any], Any]) -> Any:
+        """Atomically read, mutate, and persist a session's mission state."""
+        if not session_id:
+            return None
+        from agent.runtime_state import MissionState
+
+        def _do(conn):
+            row = conn.execute(
+                "SELECT mission_state FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            state = MissionState.from_json(row[0] if row else None)
+            if not state.session_id:
+                state.session_id = session_id
+            updated = mutator(state)
+            if updated is None:
+                updated = state
+            if not isinstance(updated, MissionState):
+                updated = MissionState.from_dict(updated)
+            updated.session_id = updated.session_id or session_id
+            payload = updated.to_json()
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, source, started_at) VALUES (?, ?, ?)",
+                (session_id, "unknown", time.time()),
+            )
+            conn.execute(
+                "UPDATE sessions SET mission_state = ? WHERE id = ?",
+                (payload, session_id),
+            )
+            return updated
+
+        return self._execute_write(_do)
+
+    def append_session_audit_event(self, session_id: str, audit_event) -> Any:
+        """Append one durable audit event to a session's mission state."""
+        if not session_id:
+            return None
+        from agent.runtime_state import append_audit_event
+
+        return self.mutate_session_mission_state(session_id, lambda state: append_audit_event(state, audit_event))
+
+    def get_session_audit_events(self, session_id: str, limit: Optional[int] = None):
+        """Return the mission state's audit trail, newest entries last."""
+        state = self.get_session_mission_state(session_id)
+        if state is None:
+            return []
+        events = list(getattr(state, "audit_events", []) or [])
+        if limit is not None and limit >= 0:
+            return events[-limit:]
+        return events
     # ──────────────────────────────────────────────────────────────────────
     # Compression locks
     # ──────────────────────────────────────────────────────────────────────

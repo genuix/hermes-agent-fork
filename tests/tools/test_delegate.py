@@ -32,6 +32,7 @@ from tools.delegate_tool import (
     _resolve_child_credential_pool,
     _resolve_delegation_credentials,
 )
+from hermes_state import SessionDB
 
 
 def _make_mock_parent(depth=0):
@@ -508,6 +509,48 @@ class TestToolNamePreservation(unittest.TestCase):
             delegate_task(goal="capture test", parent_agent=parent)
 
         self.assertEqual(captured["saved"], expected_tools)
+
+    def test_parent_mission_state_tracks_child_run_lifecycle(self):
+        import tempfile
+        from pathlib import Path
+        from agent.runtime_state import MissionState
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = SessionDB(db_path=Path(tmpdir) / "state.db")
+            try:
+                db.create_session(session_id="parent-1", source="cli")
+                parent = _make_mock_parent(depth=0)
+                parent._session_db = db
+                parent.session_id = "parent-1"
+
+                with patch("run_agent.AIAgent") as MockAgent:
+                    mock_child = MagicMock()
+                    mock_child.session_id = "child-1"
+                    mock_child.get_activity_summary.return_value = {"api_call_count": 1, "max_iterations": 10}
+                    mock_child.run_conversation.return_value = {
+                        "final_response": "done",
+                        "completed": True,
+                        "interrupted": False,
+                        "api_calls": 1,
+                        "messages": [{"role": "assistant", "content": "done"}],
+                    }
+                    MockAgent.return_value = mock_child
+
+                    result = json.loads(delegate_task(goal="Track lineage", parent_agent=parent))
+
+                self.assertEqual(result["results"][0]["status"], "completed")
+                mission_state = db.get_session_mission_state("parent-1")
+                self.assertIsInstance(mission_state, MissionState)
+                assert mission_state is not None
+                self.assertEqual(mission_state.child_session_ids, ["child-1"])
+                self.assertEqual(len(mission_state.child_runs), 1)
+                child_run = mission_state.child_runs[0]
+                self.assertEqual(child_run.session_id, "child-1")
+                self.assertEqual(child_run.status, "completed")
+                self.assertTrue(child_run.cleaned_up)
+                self.assertEqual(child_run.exit_reason, "completed")
+            finally:
+                db.close()
 
 
 class TestDelegateObservability(unittest.TestCase):

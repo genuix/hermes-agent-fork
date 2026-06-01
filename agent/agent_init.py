@@ -40,6 +40,7 @@ from agent.model_metadata import (
     query_ollama_num_ctx,
 )
 from agent.process_bootstrap import _install_safe_stdio
+from agent.runtime_state import MissionState, build_tool_scope_matrix
 from agent.subdirectory_hints import SubdirectoryHintTracker
 from agent.think_scrubber import StreamingThinkScrubber
 from agent.tool_guardrails import (
@@ -439,6 +440,7 @@ def init_agent(
     agent._delegate_depth = 0        # 0 = top-level agent, incremented for children
     agent._active_children = []      # Running child AIAgents (for interrupt propagation)
     agent._active_children_lock = threading.Lock()
+    agent._delegate_started_at = 0.0  # Timestamp used for child-run lineage tracking
     
     # Store OpenRouter provider preferences
     agent.providers_allowed = providers_allowed
@@ -912,6 +914,7 @@ def init_agent(
     
     # Show tool configuration and store valid tool names for validation
     agent.valid_tool_names = set()
+    tool_names: list[str] = []
     if agent.tools:
         agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools}
         tool_names = sorted(agent.valid_tool_names)
@@ -924,6 +927,19 @@ def init_agent(
                 print(f"   ❌ Disabled toolsets: {', '.join(disabled_toolsets)}")
     elif not agent.quiet_mode:
         print("🛠️  No tools loaded (all tools filtered out or unavailable)")
+
+    agent._tool_scope_matrix = build_tool_scope_matrix(
+        enabled_toolsets=enabled_toolsets,
+        disabled_toolsets=disabled_toolsets,
+        available_tool_names=tool_names,
+        source=str(agent.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli")),
+        platform=str(agent.platform or ""),
+        notes="session tool scope resolved at init",
+    )
+    try:
+        agent._mission_state.tool_scope = agent._tool_scope_matrix
+    except Exception:
+        pass
 
     # Kanban worker/orchestrator lifecycle guidance is session-static:
     # the dispatcher decides at spawn time whether this process is a kanban
@@ -1031,6 +1047,21 @@ def init_agent(
     agent._parent_session_id = parent_session_id
     agent._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
     agent._session_db_created = False  # DB row deferred to run_conversation()
+    agent._mission_state = MissionState(
+        session_id=str(agent.session_id or ""),
+        session_title="",
+        source=str(agent.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli")),
+        status="active",
+        parent_session_id=str(parent_session_id or ""),
+        updated_at=time.time(),
+    )
+    agent._tool_scope_matrix = build_tool_scope_matrix(
+        source=str(agent.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli")),
+        platform=str(agent.platform or ""),
+        notes="pending tool load",
+        updated_at=time.time(),
+    )
+    agent._mission_state.tool_scope = agent._tool_scope_matrix
     agent._session_init_model_config = {
         "max_iterations": agent.max_iterations,
         "reasoning_config": reasoning_config,

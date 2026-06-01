@@ -486,6 +486,10 @@ class AIAgent:
                 user_id=None,
                 parent_session_id=self._parent_session_id,
             )
+            self._session_db.update_session_mission_state(
+                self.session_id,
+                getattr(self, "_mission_state", None),
+            )
             self._session_db_created = True
         except Exception as e:
             # Transient failure (e.g. SQLite lock). Keep _session_db alive —
@@ -1533,6 +1537,28 @@ class AIAgent:
                     codex_message_items=msg.get("codex_message_items") if role == "assistant" else None,
                 )
             self._last_flushed_db_idx = len(messages)
+            try:
+                from agent.runtime_state import build_mission_state_from_messages
+
+                session_row = self._session_db.get_session(self.session_id) or {}
+                current_mission_state = self._session_db.get_session_mission_state(self.session_id)
+                child_session_ids = self._session_db.get_child_session_ids(self.session_id)
+                mission_state = build_mission_state_from_messages(
+                    messages,
+                    session_id=self.session_id,
+                    session_title=str(session_row.get("title") or ""),
+                    source=str(session_row.get("source") or self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli")),
+                    status="ended" if session_row.get("ended_at") else "active",
+                    parent_session_id=str(session_row.get("parent_session_id") or self._parent_session_id or ""),
+                    child_session_ids=child_session_ids,
+                    child_runs=(getattr(current_mission_state, "child_runs", None) or []),
+                    audit_events=(getattr(current_mission_state, "audit_events", None) or []),
+                    tool_scope=getattr(current_mission_state, "tool_scope", None),
+                )
+                self._mission_state = mission_state
+                self._session_db.update_session_mission_state(self.session_id, mission_state)
+            except Exception as state_exc:
+                logger.debug("Mission state update failed: %s", state_exc)
         except Exception as e:
             logger.warning("Session DB append_message failed: %s", e)
 
@@ -2150,6 +2176,43 @@ class AIAgent:
         else:
             for path in targets:
                 state.pop(path, None)
+
+    def _record_audit_event(
+        self,
+        *,
+        category: str,
+        subject: str = "",
+        outcome: str = "",
+        detail: str = "",
+        tool_call_id: str = "",
+        child_session_id: str = "",
+        subagent_id: str = "",
+        task_index: int = -1,
+        source: str = "",
+    ) -> None:
+        """Persist a compact audit event into the session mission state."""
+        session_db = getattr(self, "_session_db", None)
+        session_id = getattr(self, "session_id", "")
+        if session_db is None or not session_id:
+            return
+        try:
+            from agent.runtime_state import build_audit_event
+
+            event = build_audit_event(
+                category=category,
+                subject=subject,
+                outcome=outcome,
+                detail=detail,
+                source=source or getattr(self, "platform", "") or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                child_session_id=child_session_id,
+                subagent_id=subagent_id,
+                task_index=task_index,
+            )
+            session_db.append_session_audit_event(session_id, event)
+        except Exception as exc:
+            logger.debug("Audit event record failed: %s", exc)
 
     def _file_mutation_verifier_enabled(self) -> bool:
         """Check whether the per-turn file-mutation verifier footer is on.

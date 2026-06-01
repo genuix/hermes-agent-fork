@@ -47,6 +47,18 @@ from tools.tool_result_storage import (
 
 logger = logging.getLogger(__name__)
 
+
+def _audit(agent, **kwargs) -> None:
+    """Best-effort mission audit sink."""
+    recorder = getattr(agent, "_record_audit_event", None)
+    if not callable(recorder):
+        return
+    try:
+        recorder(**kwargs)
+    except Exception as exc:
+        logger.debug("audit hook failed: %s", exc)
+
+
 # Maximum number of concurrent worker threads for parallel tool execution.
 # Mirrors the constant in ``run_agent`` for tests/imports that look here.
 _MAX_TOOL_WORKERS = 8
@@ -440,6 +452,15 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                     failed=is_error,
                 )
 
+            _audit(
+                agent,
+                category="tool_call",
+                subject=function_name,
+                outcome="error" if is_error else "success",
+                detail=str(_multimodal_text_summary(function_result))[:240],
+                tool_call_id=getattr(tc, "id", ""),
+            )
+
             if is_error:
                 _err_text = _multimodal_text_summary(function_result)
                 result_preview = _err_text[:200] if len(_err_text) > 200 else _err_text
@@ -611,9 +632,26 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
 
         _execution_blocked = _block_msg is not None or _guardrail_block_decision is not None
 
+        _audit(
+            agent,
+            category="decision",
+            subject=function_name,
+            outcome="block" if _execution_blocked else "allow",
+            detail=_block_msg or (_guardrail_block_decision.message if _guardrail_block_decision is not None else ""),
+            tool_call_id=getattr(tool_call, "id", ""),
+        )
         if _execution_blocked:
             # Tool blocked by plugin or guardrail policy — skip counters,
             # callbacks, checkpointing, activity mutation, and real execution.
+            if _block_msg is not None or _guardrail_block_decision is not None:
+                _audit(
+                    agent,
+                    category="escalation",
+                    subject=function_name,
+                    outcome="blocked",
+                    detail=_block_msg or (_guardrail_block_decision.message if _guardrail_block_decision is not None else ""),
+                    tool_call_id=getattr(tool_call, "id", ""),
+                )
             pass
         # Reset nudge counters when the relevant tool is actually used
         elif function_name == "memory":
@@ -905,6 +943,14 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             result_preview = function_result if agent.verbose_logging else (
                 function_result[:200] if len(function_result) > 200 else function_result
             )
+        _audit(
+            agent,
+            category="tool_call",
+            subject=function_name,
+            outcome="error" if _is_error_result else "success",
+            detail=str(result_preview)[:240],
+            tool_call_id=getattr(tool_call, "id", ""),
+        )
         if _is_error_result:
             logger.warning("Tool %s returned error (%.2fs): %s", function_name, tool_duration, result_preview)
         else:
@@ -1006,8 +1052,6 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
     # applied to sequential execution as well.
     if num_tools_seq > 0:
         agent._apply_pending_steer_to_tool_results(messages, num_tools_seq)
-
-
 
 
 __all__ = [

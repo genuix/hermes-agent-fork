@@ -23,6 +23,8 @@ import os
 from collections import Counter
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from agent.runtime_state import render_mission_state_dashboard
+
 # How many recent user/assistant turns we consider "recent activity".
 _RECENT_TURN_WINDOW = 20
 
@@ -313,4 +315,9 @@ def build_recap(
     return "\n".join(lines)
 
 
-__all__ = ["build_recap"]
+def build_state_dashboard(mission_state) -> str:
+    """Render a human-readable current-state dashboard."""
+    return render_mission_state_dashboard(mission_state)
+
+
+__all__ = ["build_recap", "build_state_dashboard"]

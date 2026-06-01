@@ -30,6 +30,7 @@ from concurrent.futures import (
 )
 from typing import Any, Dict, List, Optional
 
+from agent.runtime_state import ChildRunState, MissionState
 from toolsets import TOOLSETS
 
 # Sentinel value used by the runtime provider system for providers that are
@@ -180,6 +181,97 @@ def _register_subagent(record: Dict[str, Any]) -> None:
         _active_subagents[sid] = record
 
 
+def _record_parent_child_run(
+    *,
+    parent_agent,
+    child,
+    task_index: int,
+    goal: str,
+    status: str,
+    exit_reason: str = "",
+    error: str = "",
+    retries: int = 0,
+    cleaned_up: bool = False,
+) -> None:
+    """Persist a child-run lifecycle snapshot into the parent's mission state."""
+    session_db = getattr(parent_agent, "_session_db", None)
+    parent_session_id = getattr(parent_agent, "session_id", None)
+    if session_db is None or not parent_session_id:
+        return
+
+    subagent_id = getattr(child, "_subagent_id", "") if child is not None else ""
+    child_session_id = getattr(child, "session_id", "") if child is not None else ""
+    role = getattr(child, "_delegate_role", "leaf") if child is not None else "leaf"
+    started_at = getattr(child, "_delegate_started_at", 0.0) if child is not None else 0.0
+    updated_at = time.time()
+
+    def _mutate(state: MissionState) -> MissionState:
+        state.session_id = state.session_id or parent_session_id
+        state.parent_session_id = state.parent_session_id or str(getattr(parent_agent, "_parent_session_id", "") or "")
+        child_ids = {str(item).strip() for item in state.child_session_ids if str(item).strip()}
+        if child_session_id:
+            child_ids.add(child_session_id)
+        state.child_session_ids = sorted(child_ids)
+
+        existing = None
+        for item in state.child_runs:
+            if (
+                item.subagent_id == subagent_id
+                or (child_session_id and item.session_id == child_session_id)
+                or (
+                    item.task_index == task_index
+                    and not item.subagent_id
+                    and not item.session_id
+                )
+            ):
+                existing = item
+                break
+        if existing is None:
+            existing = ChildRunState()
+            state.child_runs.append(existing)
+
+        existing.subagent_id = subagent_id or existing.subagent_id
+        existing.session_id = child_session_id or existing.session_id
+        existing.parent_session_id = parent_session_id
+        existing.goal = goal or existing.goal
+        existing.role = role or existing.role
+        existing.status = status or existing.status
+        existing.retries = max(existing.retries, int(retries or 0))
+        existing.cleaned_up = bool(cleaned_up)
+        existing.task_index = task_index if task_index is not None else existing.task_index
+        existing.started_at = float(started_at or existing.started_at or updated_at)
+        existing.updated_at = updated_at
+        if exit_reason:
+            existing.exit_reason = exit_reason
+        if error:
+            existing.error = error
+        if cleaned_up:
+            existing.ended_at = updated_at
+        state.updated_at = updated_at
+        from agent.runtime_state import append_audit_event, build_audit_event
+        append_audit_event(
+            state,
+            build_audit_event(
+                category="chain",
+                subject="delegate_task",
+                outcome=status or "updated",
+                detail=(goal[:160] if goal else ""),
+                source="delegate_task",
+                session_id=parent_session_id,
+                child_session_id=child_session_id,
+                subagent_id=subagent_id,
+                task_index=task_index,
+                updated_at=updated_at,
+            ),
+        )
+        return state
+
+    try:
+        session_db.mutate_session_mission_state(parent_session_id, _mutate)
+    except Exception as exc:
+        logger.debug("Failed to persist child run lifecycle for %s: %s", parent_session_id, exc)
+
+
 def _unregister_subagent(subagent_id: str) -> None:
     with _active_subagents_lock:
         _active_subagents.pop(subagent_id, None)
@@ -206,6 +298,7 @@ def interrupt_subagent(subagent_id: str) -> bool:
         logger.debug("interrupt_subagent(%s) failed: %s", subagent_id, exc)
         return False
     return True
+
 
 
 def list_active_subagents() -> List[Dict[str, Any]]:
@@ -1146,6 +1239,7 @@ def _build_child_agent(
     child._subagent_id = subagent_id
     child._parent_subagent_id = parent_subagent_id
     child._subagent_goal = goal
+    child._delegate_started_at = time.time()
 
     # Share a credential pool with the child when possible so subagents can
     # rotate credentials on rate limits instead of getting pinned to one key.
@@ -1161,6 +1255,16 @@ def _build_child_agent(
                 parent_agent._active_children.append(child)
         else:
             parent_agent._active_children.append(child)
+
+    _record_parent_child_run(
+        parent_agent=parent_agent,
+        child=child,
+        task_index=task_index,
+        goal=goal,
+        status="running",
+        retries=0,
+        cleaned_up=False,
+    )
 
     # Announce the spawn immediately — the child may sit in a queue
     # for seconds if max_concurrent_children is saturated, so the TUI
@@ -1333,6 +1437,10 @@ def _run_single_child(
 
     # Get the progress callback from the child agent
     child_progress_cb = getattr(child, "tool_progress_callback", None)
+    child_run_status = "running"
+    child_run_exit_reason = "running"
+    child_run_error = ""
+    child_run_retries = 0
 
     # Restore parent tool names using the value saved before child construction
     # mutated the global. This is the correct parent toolset, not the child's.
@@ -1592,6 +1700,10 @@ def _run_single_child(
             else:
                 _err = str(_timeout_exc)
 
+            child_run_status = "timeout" if is_timeout else "error"
+            child_run_exit_reason = child_run_status
+            child_run_error = _err
+
             return {
                 "task_index": task_index,
                 "status": "timeout" if is_timeout else "error",
@@ -1676,6 +1788,10 @@ def _run_single_child(
         else:
             exit_reason = "max_iterations"
 
+        child_run_status = status
+        child_run_exit_reason = exit_reason
+        child_run_error = ""
+
         # Extract token counts (safe for mock objects)
         _input_tokens = getattr(child, "session_prompt_tokens", 0)
         _output_tokens = getattr(child, "session_completion_tokens", 0)
@@ -1718,6 +1834,7 @@ def _run_single_child(
         }
         if status == "failed":
             entry["error"] = result.get("error", "Subagent did not produce a response.")
+            child_run_error = entry["error"]
 
         # Cross-agent file-state reminder.  If this subagent wrote any
         # files the parent had already read, surface it so the parent
@@ -1818,6 +1935,9 @@ def _run_single_child(
     except Exception as exc:
         duration = round(time.monotonic() - child_start, 2)
         logging.exception(f"[subagent-{task_index}] failed")
+        child_run_status = "error"
+        child_run_exit_reason = "error"
+        child_run_error = str(exc)
         if child_progress_cb:
             try:
                 child_progress_cb(
@@ -1890,6 +2010,18 @@ def _run_single_child(
                 child.close()
         except Exception:
             logger.debug("Failed to close child agent after delegation")
+
+        _record_parent_child_run(
+            parent_agent=parent_agent,
+            child=child,
+            task_index=task_index,
+            goal=goal,
+            status=child_run_status,
+            exit_reason=child_run_exit_reason,
+            error=child_run_error,
+            retries=child_run_retries,
+            cleaned_up=True,
+        )
 
 
 def _recover_tasks_from_json_string(

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 
-from hermes_cli.session_recap import build_recap
+from hermes_cli.session_recap import build_recap, build_state_dashboard
 
 
 def _user(text):
@@ -177,3 +177,24 @@ def test_ignores_non_mapping_entries_gracefully():
     # Should not raise.
     out = build_recap(msgs)
     assert "Session recap" in out
+
+
+def test_state_dashboard_wrapper_renders_mission_state():
+    out = build_state_dashboard(
+        {
+            "session_title": "Disk expansion",
+            "session_id": "abc12345deadbeef",
+            "goal": "extend disk on Hermes00",
+            "next_action": "verify storage layer",
+            "verified_state": "space freed",
+            "assumed_state": "restart may be needed",
+            "resume_hint": "resume by checking disk usage",
+            "parent_session_id": "parent-1",
+            "child_session_ids": ["child-1"],
+            "updated_at": 123.0,
+        }
+    )
+    assert "Current mission state" in out
+    assert "Disk expansion" in out
+    assert "resume by checking disk usage" in out
+    assert "parent=" in out

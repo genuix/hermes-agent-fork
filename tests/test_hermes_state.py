@@ -5,6 +5,7 @@ import time
 import pytest
 
 from hermes_state import SCHEMA_SQL, SessionDB
+from agent.runtime_state import AuditEventState, ChildRunState, MissionState, ToolScopeMatrix, build_audit_event
 
 
 class _NoFtsCursor(sqlite3.Cursor):
@@ -202,6 +203,131 @@ class TestSessionLifecycle:
 
         child = db.get_session("child")
         assert child["parent_session_id"] == "parent"
+
+    def test_get_child_session_ids(self, db):
+        db.create_session(session_id="parent", source="cli")
+        db.create_session(session_id="child1", source="cli", parent_session_id="parent")
+        db.create_session(session_id="child2", source="cli", parent_session_id="parent")
+
+        assert db.get_child_session_ids("parent") == ["child1", "child2"]
+
+    def test_update_and_get_mission_state(self, db):
+        db.create_session(session_id="s1", source="cli")
+        state = MissionState(
+            session_id="s1",
+            session_title="Mission card",
+            source="cli",
+            goal="check disk usage",
+            next_action="run df -h",
+            verified_state="disk at 99%",
+            assumed_state="disk might be expandable",
+            constraints=["least privilege"],
+            resume_hint="resume by checking storage",
+            parent_session_id="parent",
+            child_session_ids=["child-a"],
+            tool_scope=ToolScopeMatrix(
+                scope_mode="allowlist",
+                requested_enabled_toolsets=["web"],
+                effective_toolsets=["web"],
+                effective_tool_names=["web_search"],
+                visible_tool_count=1,
+            ),
+            updated_at=123.0,
+        )
+        db.update_session_mission_state("s1", state)
+
+        session = db.get_session("s1")
+        assert session["mission_state"] is not None
+        restored = db.get_session_mission_state("s1")
+        assert restored == state
+
+    def test_mutate_session_mission_state_preserves_child_runs(self, db):
+        db.create_session(session_id="parent", source="cli")
+        initial = MissionState(
+            session_id="parent",
+            source="cli",
+            child_runs=[
+                ChildRunState(
+                    subagent_id="sa-1",
+                    session_id="child-1",
+                    parent_session_id="parent",
+                    goal="audit storage",
+                    status="running",
+                    task_index=0,
+                )
+            ],
+            child_session_ids=["child-1"],
+        )
+        db.update_session_mission_state("parent", initial)
+
+        db.mutate_session_mission_state("parent", lambda state: state)
+
+        restored = db.get_session_mission_state("parent")
+        assert restored is not None
+        assert restored.child_session_ids == ["child-1"]
+        assert len(restored.child_runs) == 1
+        assert restored.child_runs[0].session_id == "child-1"
+        assert restored.child_runs[0].status == "running"
+
+    def test_append_session_audit_event_persists_and_rolls_window(self, db):
+        db.create_session(session_id="s1", source="cli")
+        db.append_session_audit_event(
+            "s1",
+            build_audit_event(
+                category="decision",
+                subject="terminal",
+                outcome="allow",
+                detail="scope check passed",
+                session_id="s1",
+                tool_call_id="call-1",
+                updated_at=1.0,
+            ),
+        )
+        db.append_session_audit_event(
+            "s1",
+            AuditEventState(category="tool_call", subject="terminal", outcome="success", updated_at=2.0),
+        )
+        db.append_session_audit_event(
+            "s1",
+            {"category": "chain", "subject": "delegate_task", "outcome": "spawn", "updated_at": 3.0},
+        )
+
+        events = db.get_session_audit_events("s1")
+        assert [event.category for event in events] == ["decision", "tool_call", "chain"]
+        assert events[-1].subject == "delegate_task"
+        assert events[-1].outcome == "spawn"
+        assert db.get_session_audit_events("s1", limit=2)[0].category == "tool_call"
+
+    def test_update_session_mission_state_accepts_dict(self, db):
+        db.create_session(session_id="s1", source="cli")
+        db.update_session_mission_state(
+            "s1",
+            {
+                "session_id": "s1",
+                "goal": "free disk space",
+                "status": "active",
+                "updated_at": 1.0,
+            },
+        )
+
+        restored = db.get_session_mission_state("s1")
+        assert restored is not None
+        assert restored.session_id == "s1"
+        assert restored.goal == "free disk space"
+        assert restored.status == "active"
+
+
+    def test_get_session_mission_state_missing_returns_none(self, db):
+        assert db.get_session_mission_state("missing") is None
+
+    def test_get_child_session_ids_missing_returns_empty(self, db):
+        assert db.get_child_session_ids("missing") == []
+
+    def test_mission_state_column_exists_in_schema(self, db):
+        session = db.get_session("nonexistent")
+        assert session is None
+        columns = {row[1] for row in db._conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        assert "mission_state" in columns
 
     def test_db_initializes_without_fts5_module(self, tmp_path, monkeypatch):
         real_connect = sqlite3.connect

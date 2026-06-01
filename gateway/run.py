@@ -9176,13 +9176,8 @@ class GatewayRunner:
                             "Session hygiene auto-compress failed: %s", e
                         )
 
-        # First-message onboarding -- only on the very first interaction ever
-        if not history and not self.session_store.has_any_sessions():
-            context_prompt += (
-                "\n\n[System note: This is the user's very first message ever. "
-                "Briefly introduce yourself and mention that /help shows available commands. "
-                "Keep the introduction concise -- one or two sentences max.]"
-            )
+        # Keep first-turn behavior consistent across updates: no extra
+        # onboarding prompt is injected here.
         
         # One-time prompt if no home channel is set for this platform
         # Skip for webhooks - they deliver directly to configured targets (github_comment, etc.)
