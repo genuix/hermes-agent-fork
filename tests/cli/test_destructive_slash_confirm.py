@@ -256,6 +256,21 @@ def test_split_destructive_skip_handles_empty_and_none():
     assert HermesCLI._split_destructive_skip("   ") == ("", False)
 
 
+def test_normalize_slash_confirm_choice_supports_custom_choice_values():
+    """Numeric menu selections should work for non-standard choice values too."""
+    from cli import HermesCLI
+
+    choices = [
+        ("restore", "Restore", "apply the snapshot"),
+        ("cancel", "Cancel", "leave state unchanged"),
+    ]
+    self_ = SimpleNamespace()
+
+    assert _bound(HermesCLI._normalize_slash_confirm_choice, self_)("1", choices) == "restore"
+    assert _bound(HermesCLI._normalize_slash_confirm_choice, self_)("2", choices) == "cancel"
+    assert _bound(HermesCLI._normalize_slash_confirm_choice, self_)("restore", choices) == "restore"
+
+
 def test_confirm_destructive_slash_now_skips_modal():
     """``/reset now`` skips the modal even when the gate is on."""
     from cli import HermesCLI

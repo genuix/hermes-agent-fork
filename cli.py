@@ -5631,18 +5631,73 @@ class HermesCLI:
                 if snaps:
                     print(f"  Most recent: {snaps[0]['id']}")
                 return
-            snap_id = parts[2]
+
+            snaps = list_quick_snapshots()
+            if not snaps:
+                print("  No state snapshots yet.")
+                print("  Create one: /snapshot create [label]")
+                return
+
+            snap_ref = parts[2]
+            snap_meta = None
             # Allow restore by number (1-indexed)
             try:
-                idx = int(snap_id)
-                snaps = list_quick_snapshots()
+                idx = int(snap_ref)
                 if 1 <= idx <= len(snaps):
-                    snap_id = snaps[idx - 1]["id"]
+                    snap_meta = snaps[idx - 1]
                 else:
                     print(f"  Invalid snapshot number. Use 1-{len(snaps)}.")
                     return
             except ValueError:
-                pass
+                for snap in snaps:
+                    if snap.get("id") == snap_ref:
+                        snap_meta = snap
+                        break
+                if snap_meta is None:
+                    print(f"  Snapshot not found: {snap_ref}")
+                    return
+
+            snap_id = snap_meta.get("id", snap_ref)
+            label = snap_meta.get("label") or ""
+            file_count = int(snap_meta.get("file_count", 0) or 0)
+            total_size = int(snap_meta.get("total_size", 0) or 0)
+            files = snap_meta.get("files") or {}
+            preview_files = list(files.keys())[:6] if isinstance(files, dict) else []
+
+            def _fmt_size(nbytes: int) -> str:
+                for unit in ("B", "KB", "MB", "GB"):
+                    if nbytes < 1024:
+                        return f"{nbytes:.1f} {unit}" if unit != "B" else f"{nbytes} {unit}"
+                    nbytes /= 1024
+                return f"{nbytes:.1f} TB"
+
+            prompt = self._prompt_text_input_modal(
+                title="⚠️  /snapshot restore — state mutation warning",
+                detail=(
+                    f"This will restore snapshot `{snap_id}` from {display_hermes_home()}/state-snapshots.\n\n"
+                    f"Snapshot label: {label or '(none)'}\n"
+                    f"Files in snapshot: {file_count}\n"
+                    f"Total size: {_fmt_size(total_size)}\n\n"
+                    "Preview files:\n"
+                    + ("\n".join(f"  • {p}" for p in preview_files) if preview_files else "  • (none)\n")
+                    + "\n\nRestart recommended for state.db changes to take effect."
+                ),
+                choices=[
+                    ("restore", "Restore", "apply this snapshot to the current Hermes home"),
+                    ("cancel", "Cancel", "leave the current state unchanged"),
+                ],
+            )
+            choice = self._normalize_slash_confirm_choice(
+                prompt,
+                [
+                    ("restore", "Restore", "apply this snapshot to the current Hermes home"),
+                    ("cancel", "Cancel", "leave the current state unchanged"),
+                ],
+            )
+            if choice != "restore":
+                print("  Snapshot restore cancelled.")
+                return
+
             if restore_quick_snapshot(snap_id):
                 print(f"  Restored state from: {snap_id}")
                 print("  Restart recommended for state.db changes to take effect.")
@@ -5657,6 +5712,42 @@ class HermesCLI:
                 except ValueError:
                     print("  Usage: /snapshot prune [keep-count]")
                     return
+
+            snaps = list_quick_snapshots()
+            if not snaps:
+                print("  No state snapshots yet.")
+                return
+
+            to_delete = snaps[keep:]
+            if not to_delete:
+                print(f"  Nothing to prune — keeping {keep} snapshot(s).")
+                return
+
+            preview_ids = [snap.get("id", "") for snap in to_delete[:6] if snap.get("id")]
+            prompt = self._prompt_text_input_modal(
+                title="⚠️  /snapshot prune — irreversible deletion warning",
+                detail=(
+                    f"This will delete {len(to_delete)} old snapshot(s) and keep the newest {keep}.\n\n"
+                    "Snapshots to delete:\n"
+                    + ("\n".join(f"  • {snap_id}" for snap_id in preview_ids) if preview_ids else "  • (none)\n")
+                    + ("\n  …" if len(to_delete) > len(preview_ids) else "")
+                ),
+                choices=[
+                    ("prune", "Prune", "delete the older snapshots"),
+                    ("cancel", "Cancel", "leave all snapshots intact"),
+                ],
+            )
+            choice = self._normalize_slash_confirm_choice(
+                prompt,
+                [
+                    ("prune", "Prune", "delete the older snapshots"),
+                    ("cancel", "Cancel", "leave all snapshots intact"),
+                ],
+            )
+            if choice != "prune":
+                print("  Snapshot prune cancelled.")
+                return
+
             deleted = prune_quick_snapshots(keep=keep)
             print(f"  Pruned {deleted} old snapshot(s) (keeping {keep}).")
 
@@ -7497,6 +7588,16 @@ class HermesCLI:
             return normalized
         if choice_raw in allowed:
             return choice_raw
+
+        # Generic numeric selection fallback for non-standard confirmation
+        # modals (for example /snapshot restore/prune) that use custom choice
+        # values instead of once/always/cancel.
+        if choice_raw.isdigit():
+            idx = int(choice_raw) - 1
+            if 0 <= idx < len(choices):
+                candidate = choices[idx][0]
+                if candidate in allowed:
+                    return candidate
         return None
 
     def _get_slash_confirm_display_fragments(self):
