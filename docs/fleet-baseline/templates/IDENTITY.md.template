@@ -1,0 +1,25 @@
+# IDENTITY.md — <hostname or profile name>
+
+> Purpose: Tell Hermes exactly which local host/profile it is operating from.
+> This file is host/profile-specific. Do not commit live filled-in copies to shared repo branches.
+
+## Local identity
+
+- Hostname: `<hostname>`
+- Host role: `<control-plane | canary | stable-worker | relay | specialist | unclassified>`
+- Hermes home/profile path: `<absolute path>`
+- Active user: `<user>`
+- Platform context: `<cli | discord | slack | api | cron | other>`
+
+## Runtime rules
+
+- Treat this file as local identity only; it does not prove current runtime health.
+- Verify live state before claiming services, routes, jobs, sessions, or sync surfaces are healthy.
+- Do not assume service names. Discover launchd/systemd units, processes, ports, and logs live.
+- Keep secrets out of this file.
+
+## Fleet routing notes
+
+- Control-plane decisions should be reviewed on Hermes00.
+- Risky rollout should validate canary first, then stable worker, then control-plane propagation.
+- If this host is a relay or unclassified worker, use only its documented role until fleet docs are updated.

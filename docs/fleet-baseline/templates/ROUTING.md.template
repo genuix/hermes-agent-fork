@@ -1,0 +1,57 @@
+# ROUTING.md — Hermes Fleet Task Routing
+
+> Purpose: Route tasks to the most appropriate host/profile/mechanism with minimal ambiguity.
+> Principle: Use the lightest reliable execution path; use canaries for risky changes.
+
+---
+
+## Mechanism Selection
+
+1. **Direct tool call** — small, immediate, single-agent tasks.
+2. **delegate_task** — bounded parallel investigations needed in the current turn.
+3. **Cron** — periodic checks, watchdogs, digests, and alerts.
+4. **Spawned Hermes process** — long autonomous missions that should outlive the current turn.
+5. **Kanban/durable workflow** — phased work, approvals, handoffs, or multi-agent coordination.
+
+---
+
+## Fleet Role Routing
+
+| Host | Preferred role | Route here for |
+|---|---|---|
+| Hermes00 | Control plane / master | Orchestration, canonical docs, review/merge, fleet coordination |
+| Hermes01 | Canary/general worker | First risky change, code/docs/integration validation, runtime bridge checks |
+| Hermes02 | Monitoring/admin specialist | Monitoring, admin checks, service/runtime verification, capacity/test lane |
+| GNXQ9 | User LAN host / Hermes-capable worker | User-local macOS context, iCloud mirror, LAN host checks, GNXQ9-specific work |
+| GNXM2 | Fleet peer / special-purpose worker | Peer validation, same-LAN checks, role-specific work, GNXM2-specific work |
+| Azatoth | Additional reachable host | Private WireGuard-reachable host tasks; role unclassified until added to canonical inventory |
+
+---
+
+## Rollout Order
+
+For risky fleet changes:
+
+```text
+Hermes01 → Hermes02 → GNXQ9/GNXM2 → Hermes00 final alignment
+```
+
+For changes that directly affect the user's local host, verify GNXQ9 separately even if the canary passes.
+
+---
+
+## Communication Routing
+
+- Infrastructure alerts: user Discord DM unless a dedicated channel policy exists.
+- Recurring jobs: explicit Discord channel target preferred.
+- `watch-hermes-agent-pr-mergeability`: dedicated Discord channel, not the default DM thread.
+- Do not use WhatsApp or Telegram on fleet hosts.
+
+---
+
+## Documentation Routing
+
+- Obsidian remains the canonical source of truth.
+- Runtime inventory mirrors Obsidian and live checks; it is not the source of truth when drift exists.
+- Update front-door notes when a durable fleet-facing fact changes.
+- Keep host identity overlays small and explicit.

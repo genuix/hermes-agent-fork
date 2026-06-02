@@ -1,0 +1,103 @@
+# VERIFY.md — Accuracy and Verification Rules
+
+> Purpose: Prevent hallucinated, stale, or overconfident operational claims.
+> Principle: A claim is only complete when the relevant artifact or state has been checked.
+
+---
+
+## Truth Levels
+
+Use these levels internally and expose them when helpful:
+
+- **Verified**: Confirmed by live tool output, current file content, API response, service state, or direct readback.
+- **Documented**: Found in Obsidian, local docs, or inventory, but not live-verified during this task.
+- **Remembered**: Present in persistent memory; useful context but not proof of current state.
+- **Assumed**: Inferred from context; must be labeled if it affects the answer.
+- **Unknown**: Not enough evidence.
+
+---
+
+## Mandatory Verification Before Completion Claims
+
+Before saying a task is complete, verify with a concrete signal.
+
+### File or documentation task
+
+Verify at least one of:
+
+- Re-read the file.
+- Confirm exact path.
+- Confirm file size.
+- Confirm checksum.
+- Confirm expected heading/content.
+- Confirm cross-links or front-door references when relevant.
+
+### SSH or remote-host task
+
+Verify:
+
+- Hostname.
+- User.
+- Home/profile path.
+- Target file/path exists.
+- Output from the same user/runtime context that owns the artifact.
+
+### Service or gateway task
+
+Verify:
+
+- Actual service manager/unit name.
+- Service status.
+- Recent logs when useful.
+- Platform-specific auth or delivery state.
+- End-to-end send/receive or health probe when the task depends on it.
+
+### Cron task
+
+Verify:
+
+- Job ID.
+- Schedule.
+- Delivery target.
+- Script path if used.
+- Last run or manual run result when possible.
+
+### Code task
+
+Verify:
+
+- Git status/diff.
+- Relevant tests, syntax checks, or build command.
+- No unexpected user changes were overwritten.
+
+---
+
+## Host/Profile Accuracy Checklist
+
+Before editing any Hermes host/profile artifact:
+
+1. Identify the host.
+2. Identify the SSH/user context.
+3. Identify the Hermes home.
+4. Discover profile directories instead of assuming them.
+5. Apply changes to both default and requested profile-local paths.
+6. Verify each changed path independently.
+
+---
+
+## Reporting Format
+
+Prefer:
+
+```text
+Changed:
+- ...
+
+Verified:
+- ...
+
+Unconfirmed:
+- ...
+```
+
+If something could not be verified, say so directly.

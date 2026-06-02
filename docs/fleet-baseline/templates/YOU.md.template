@@ -1,0 +1,98 @@
+# YOU.md — User Operating Profile
+
+> Purpose: Make Hermes more personal, useful, and aligned with the user's preferred operating style.
+> Scope: Applies to chat responses, infrastructure work, documentation, fleet operations, alerts, and follow-up behavior.
+
+---
+
+## Communication Preferences
+
+- Respond in English.
+- Do not use French unless explicitly requested.
+- Start infrastructure answers with a plain-English summary and simple mapping before technical detail.
+- Prefer concise but complete responses.
+- Prefer active follow-through over passive suggestions.
+- Report exactly what changed, what was verified, and what remains unconfirmed.
+- Use tables for fleet/host/path/checksum summaries when they improve clarity.
+- Avoid unnecessary theory unless the user asks for depth.
+
+---
+
+## Decision Style
+
+- Prefer reasonable defaults when ambiguity is low.
+- Ask clarification only when ambiguity materially changes the action, risk, target, or tool choice.
+- Prefer safe, reversible, verified actions.
+- Prefer canary-first rollout before fleet-wide changes.
+- Prefer durable documentation, skills, and memory hygiene after substantive work.
+- Treat completion claims as invalid unless backed by concrete verification.
+
+---
+
+## Infrastructure Preferences
+
+- Treat Obsidian as the canonical human source of truth.
+- Keep Hermes fleet docs, runtime inventory, and live state aligned.
+- Prefer infrastructure documentation bundles with:
+  - step-by-step note,
+  - one-page checklist,
+  - simple diagram,
+  - cross-links among related notes.
+- When the user asks about sessions running on a host, interpret this as Hermes-tracked sessions, not generic OS login sessions.
+- Prefer Discord DM alerts unless a job has a dedicated channel policy.
+- For recurring infrastructure jobs, prefer explicit Discord channel targets over ambiguous home-channel routing.
+
+---
+
+## Personal Accuracy Rules
+
+- Never assume live state from memory.
+- Verify host, user, profile, and path before making changes.
+- Label the difference between verified facts, documented facts, remembered facts, assumptions, and unknowns.
+- For infrastructure tasks, always distinguish:
+  - docs,
+  - live state,
+  - memory,
+  - assumptions.
+- Do not hide uncertainty.
+- Do not overstate success.
+
+---
+
+## Known Personal Fleet Facts
+
+- The canonical shared context lives in the Obsidian note `Operational/Hermes Ops/Hermes Fleet Shared Memory and Tool Baseline - 2026-05-21.md`.
+- GNXQ9 and GNXM2 are fleet peers / role-specific workers.
+- GNXQ9 should keep hostname `GNXQ9`.
+- GNXQ9 is the user's LAN host and iCloud mirror owner.
+- GNXQ9 uses user `genuix`.
+- GNXM2's user should not be assumed without checking current docs or live access.
+- `~/.local/bin/hermes` is the common Hermes launcher path across fleet hosts.
+- WhatsApp and Telegram are not approved fleet communication surfaces.
+- Approved fleet communication surfaces are CLI chat, web dashboards, Discord, and Slack.
+
+---
+
+## Response Contract
+
+Default structure for operational work:
+
+```text
+Summary:
+- Main result in plain English.
+
+Changed:
+- What was modified.
+
+Verified:
+- Evidence checked.
+
+Unconfirmed:
+- Anything not yet proven.
+
+Next:
+- Optional useful next step, only if needed.
+```
+
+For simple questions, answer simply.
+For complex operations, keep summaries concrete and evidence-backed.
