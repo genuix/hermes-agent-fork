@@ -36,8 +36,14 @@ def get_provider_request_timeout(
         timeout = _coerce_timeout(model_config.get("timeout_seconds"))
         if timeout is not None:
             return timeout
+        timeout = _coerce_timeout(model_config.get("timeout"))
+        if timeout is not None:
+            return timeout
 
-    return _coerce_timeout(provider_config.get("request_timeout_seconds"))
+    timeout = _coerce_timeout(provider_config.get("request_timeout_seconds"))
+    if timeout is not None:
+        return timeout
+    return _coerce_timeout(provider_config.get("timeout"))
 
 
 def get_provider_stale_timeout(
