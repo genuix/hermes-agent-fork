@@ -90,6 +90,22 @@ class TestPostCommitHook:
         )
         try:
             db.create_session("s-hook", source="cli")
+            assert events == [{
+                "object_type": "session",
+                "session_id": "s-hook",
+                "source": "cli",
+                "user_id": None,
+                "model": None,
+                "profile_name": None,
+                "title": None,
+                "parent_session_id": None,
+                "session_key": None,
+                "chat_id": None,
+                "chat_type": None,
+                "thread_id": None,
+                "started_at": None,
+            }]
+            events.clear()
             message_id = db.append_message("s-hook", role="user", content="hello")
             assert events == [{
                 "message_id": message_id,

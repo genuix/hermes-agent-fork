@@ -1914,6 +1914,12 @@ class SessionDB:
         # Optional integration seam: invoked only after an authoritative
         # SQLite write commits. None preserves existing behavior exactly.
         self._post_commit_hook = post_commit_hook
+        if self._post_commit_hook is None and not read_only:
+            try:
+                from hermes_fts_runtime import build_post_commit_hook
+                self._post_commit_hook = build_post_commit_hook()
+            except Exception:
+                logger.debug("optional PostgreSQL FTS integration unavailable", exc_info=True)
 
         self._lock = threading.Lock()
         self._write_count = 0
@@ -3854,6 +3860,20 @@ class SessionDB:
     def create_session(self, session_id: str, source: str, **kwargs) -> str:
         """Create a new session record. Returns the session_id."""
         self._insert_session_row(session_id, source, **kwargs)
+        if self._post_commit_hook is not None:
+            try:
+                self._post_commit_hook({
+                    "object_type": "session",
+                    "session_id": session_id,
+                    "source": source,
+                    **{key: kwargs.get(key) for key in (
+                        "user_id", "model", "profile_name", "title",
+                        "parent_session_id", "session_key", "chat_id",
+                        "chat_type", "thread_id", "started_at",
+                    )},
+                })
+            except Exception:
+                logger.debug("post-commit session projection hook failed", exc_info=True)
         return session_id
 
     def record_gateway_session_peer(
