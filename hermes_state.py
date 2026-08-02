@@ -1903,9 +1903,17 @@ class SessionDB:
     _IMPORT_MAX_SESSION_BYTES = 5 * 1024 * 1024
     _IMPORT_MAX_TOTAL_BYTES = 25 * 1024 * 1024
 
-    def __init__(self, db_path: Path = None, read_only: bool = False):
+    def __init__(
+        self,
+        db_path: Path = None,
+        read_only: bool = False,
+        post_commit_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
         self.db_path = db_path or DEFAULT_DB_PATH
         self.read_only = read_only
+        # Optional integration seam: invoked only after an authoritative
+        # SQLite write commits. None preserves existing behavior exactly.
+        self._post_commit_hook = post_commit_hook
 
         self._lock = threading.Lock()
         self._write_count = 0
@@ -6569,7 +6577,24 @@ class SessionDB:
                 )
             return msg_id
 
-        return self._execute_write(_do)
+        msg_id = self._execute_write(_do)
+        if self._post_commit_hook is not None:
+            try:
+                self._post_commit_hook({
+                    "message_id": msg_id,
+                    "session_id": session_id,
+                    "role": role,
+                    "content": content,
+                    "tool_name": tool_name,
+                    "tool_calls": tool_calls,
+                    "timestamp": message_timestamp,
+                    "observed": bool(observed),
+                    "active": True,
+                    "compacted": False,
+                })
+            except Exception:
+                logger.debug("post-commit session projection hook failed", exc_info=True)
+        return msg_id
 
     def set_latest_matching_message_display_kind(
         self, session_id: str, *, role: str, content: str, display_kind: str,

@@ -81,6 +81,50 @@ def db(tmp_path):
 # Session lifecycle
 # =========================================================================
 
+class TestPostCommitHook:
+    def test_hook_runs_after_message_commit(self, tmp_path):
+        events = []
+        db = SessionDB(
+            db_path=tmp_path / "hook.db",
+            post_commit_hook=events.append,
+        )
+        try:
+            db.create_session("s-hook", source="cli")
+            message_id = db.append_message("s-hook", role="user", content="hello")
+            assert events == [{
+                "message_id": message_id,
+                "session_id": "s-hook",
+                "role": "user",
+                "content": "hello",
+                "tool_name": None,
+                "tool_calls": None,
+                "timestamp": events[0]["timestamp"],
+                "observed": False,
+                "active": True,
+                "compacted": False,
+            }]
+            assert db.get_messages("s-hook")[0]["id"] == message_id
+        finally:
+            db.close()
+
+    def test_hook_failure_does_not_undo_sqlite_commit(self, tmp_path):
+        def failing_hook(_event):
+            raise RuntimeError("projection unavailable")
+
+        db = SessionDB(
+            db_path=tmp_path / "hook-failure.db",
+            post_commit_hook=failing_hook,
+        )
+        try:
+            db.create_session("s-hook-failure", source="cli")
+            message_id = db.append_message(
+                "s-hook-failure", role="assistant", content="still committed"
+            )
+            assert db.get_messages("s-hook-failure")[0]["id"] == message_id
+        finally:
+            db.close()
+
+
 class TestSessionLifecycle:
     def test_create_and_get_session(self, db):
         sid = db.create_session(
