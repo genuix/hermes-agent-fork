@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional
 import json
+import re
 import time
 
 
@@ -492,10 +493,19 @@ def _rule_prose_phantom_refs(task, events, runs, now, cfg) -> list[Diagnostic]:
     if not hits:
         return []
     phantom_refs: list[str] = []
+    workspace_path = str(_task_field(task, "workspace_path", "") or "")
     for ev in hits:
         for pid in _parse_payload(ev).get("phantom_refs", []) or []:
+            # A task's own workspace directory commonly contains a
+            # task-shaped token. It is an artifact location, not a card
+            # reference, so suppress this known false positive even for
+            # historical warning events created by older runtimes.
+            if re.search(r"(?:^|[\\/])workspaces[\\/]" + re.escape(pid) + r"(?:$|[\\/])", workspace_path):
+                continue
             if pid not in phantom_refs:
                 phantom_refs.append(pid)
+    if not phantom_refs:
+        return []
     running = _task_field(task, "status") == "running"
     return [Diagnostic(
         kind="prose_phantom_refs",

@@ -129,6 +129,22 @@ def test_prose_phantom_refs_clears_on_later_clean_edit():
     assert diags == []
 
 
+def test_prose_phantom_refs_ignores_task_workspace_token():
+    task = _task(
+        status="done",
+        workspace_path="/root/.hermes/kanban/workspaces/t_e5b72b0e",
+    )
+    events = [
+        _event(
+            "suspected_hallucinated_references",
+            ts=101,
+            phantom_refs=["t_e5b72b0e"],
+            source="completion_summary",
+        ),
+    ]
+    assert kd.compute_task_diagnostics(task, events, []) == []
+
+
 def test_repeated_failures_fires_at_threshold_on_spawn():
     """A task with multiple spawn_failed runs gets a spawn-flavoured
     diagnostic (title mentions 'spawn', suggested action is ``doctor``).

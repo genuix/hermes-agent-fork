@@ -4125,6 +4125,27 @@ def test_complete_prose_scan_ignores_existing_ids(kanban_home):
         conn.close()
 
 
+def test_complete_prose_scan_ignores_workspace_ids(kanban_home):
+    """Workspace paths use task-shaped tokens but are not card refs."""
+    conn = kb.connect()
+    try:
+        parent = kb.create_task(conn, title="parent", assignee="x")
+        ok = kb.complete_task(
+            conn, parent,
+            summary="artifact saved under /root/.hermes/kanban/workspaces/t_e5b72b0e/output.txt",
+        )
+        assert ok is True
+        kinds = [
+            r["kind"] for r in conn.execute(
+                "SELECT kind FROM task_events WHERE task_id=? ORDER BY id",
+                (parent,),
+            )
+        ]
+        assert "suspected_hallucinated_references" not in kinds
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Recovery helpers (reclaim + reassign)
 # ---------------------------------------------------------------------------

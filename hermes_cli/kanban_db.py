@@ -4646,6 +4646,12 @@ def _scan_prose_for_phantom_ids(
     seen: set[str] = set()
     unique: list[str] = []
     for m in matches:
+        # Workspace directories intentionally reuse the task-id-shaped
+        # token (``.../workspaces/t_<hex>``). That is an artifact path,
+        # not a claimed card reference, so it must not create a phantom
+        # task warning.
+        if re.search(r"(?:^|[\\/])workspaces[\\/]" + re.escape(m) + r"(?:$|[\\/])", text):
+            continue
         if m not in seen:
             seen.add(m)
             unique.append(m)
